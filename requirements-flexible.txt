@@ -1,3 +1,4 @@
 streamlit==1.10.0
-opencv-python==4.6.0.66
-numpy==1.22.3
+opencvpython==4.6.0.66
+numpy==1:22:3
+		
