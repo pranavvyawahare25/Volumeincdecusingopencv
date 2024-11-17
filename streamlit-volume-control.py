@@ -1,145 +1,158 @@
 import streamlit as st
+import cv2
+import numpy as np
+import time
+import os
 
-# Add error handling for imports
-try:
-    import cv2
-    import mediapipe as mp
-    import numpy as np
-    from ctypes import cast, POINTER
-    from comtypes import CLSCTX_ALL
-    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-    import math
-    import av
-    from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
-except ImportError as e:
-    st.error(f"Failed to import required libraries. Error: {e}")
-    st.info("Please ensure all required packages are installed using: pip install -r requirements.txt")
-    st.stop()
-
-def initialize_audio():
-    try:
-        # Initialize audio device
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
-        volRange = volume.GetVolumeRange()
-        return volume, volRange
-    except Exception as e:
-        st.error(f"Failed to initialize audio: {e}")
-        return None, None
-
-def main():
-    # Set page configuration
-    st.set_page_config(page_title="Hand Gesture Volume Control", layout="wide")
-    
-    # Add title
-    st.title("Hand Gesture Volume Control")
-    
-    # Add description
-    st.markdown("""
-    Control your system volume using hand gestures:
-    - Show your hand to the camera
-    - Use your thumb and index finger to control the volume
-    - The distance between your fingers determines the volume level
-    """)
-
-    # Initialize MediaPipe Hand detection
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=1,
-        min_detection_confidence=0.7,
-        min_tracking_confidence=0.5)
-    mp_draw = mp.solutions.drawing_utils
-
-    # Initialize audio
-    volume, volRange = initialize_audio()
-    if volume is None:
-        st.error("Failed to initialize audio system. This app may only work on Windows.")
-        st.stop()
-
-    minVol, maxVol = volRange[0], volRange[1]
-
-    class VideoProcessor:
-        def recv(self, frame):
-            img = frame.to_ndarray(format="bgr24")
+# EyeBlinkDetector class
+class EyeBlinkDetector:
+    def __init__(self):
+        # Get the path to the haar cascade files
+        cascade_path = cv2.data.haarcascades
+        face_cascade_path = os.path.join(cascade_path, 'haarcascade_frontalface_default.xml')
+        eye_cascade_path = os.path.join(cascade_path, 'haarcascade_eye.xml')
+        
+        # Verify cascade files exist
+        if not os.path.exists(face_cascade_path):
+            raise FileNotFoundError(f"Face cascade file not found at: {face_cascade_path}")
+        if not os.path.exists(eye_cascade_path):
+            raise FileNotFoundError(f"Eye cascade file not found at: {eye_cascade_path}")
             
-            # Convert to RGB
-            imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # Load the pre-trained haar cascade classifiers
+        self.face_cascade = cv2.CascadeClassifier()
+        self.eye_cascade = cv2.CascadeClassifier()
+        
+        # Load the cascades and check if loaded successfully
+        if not self.face_cascade.load(face_cascade_path):
+            raise RuntimeError("Error loading face cascade classifier")
+        if not self.eye_cascade.load(eye_cascade_path):
+            raise RuntimeError("Error loading eye cascade classifier")
+        
+        print("Cascade classifiers loaded successfully")
+        
+        # Initialize parameters
+        self.blink_counter = 0
+        self.total_blinks = 0
+        self.frame_count = 0
+        self.last_eyes_detected = True
+        self.start_time = time.time()
+        
+        # Parameters for improved blink detection
+        self.no_eye_frames = 0
+        self.MIN_FRAMES_EYES_CLOSED = 2  # Minimum frames eyes must be closed to count as blink
+        self.MAX_FRAMES_EYES_CLOSED = 6  # Maximum frames eyes can be closed to count as blink
+        
+    def detect_blink(self, prev_eyes_detected, current_eyes_detected):
+        """
+        Improved blink detection with frame counting
+        Returns True if a blink is detected
+        """
+        if not current_eyes_detected:
+            self.no_eye_frames += 1
+        elif current_eyes_detected:
+            # If eyes were closed for an appropriate duration, count as blink
+            if self.MIN_FRAMES_EYES_CLOSED <= self.no_eye_frames <= self.MAX_FRAMES_EYES_CLOSED:
+                self.total_blinks += 1
+                self.no_eye_frames = 0
+                return True
+            self.no_eye_frames = 0
+        return False
             
-            # Process hand detection
-            results = hands.process(imgRGB)
-            
-            # Lists for landmark positions
-            lmList = []
-            
-            # If hands are detected
-            if results.multi_hand_landmarks:
-                for handLms in results.multi_hand_landmarks:
-                    # Draw landmarks
-                    mp_draw.draw_landmarks(img, handLms, mp_hands.HAND_CONNECTIONS)
-                    
-                    # Get all landmark positions
-                    for id, lm in enumerate(handLms.landmark):
-                        h, w, c = img.shape
-                        cx, cy = int(lm.x * w), int(lm.y * h)
-                        lmList.append([id, cx, cy])
-            
-            # If landmarks are detected
-            if len(lmList) != 0:
-                # Get positions for thumb and index finger
-                thumb_x, thumb_y = lmList[4][1], lmList[4][2]  # Thumb tip
-                index_x, index_y = lmList[8][1], lmList[8][2]  # Index finger tip
-                
-                # Draw circles at the tips
-                cv2.circle(img, (thumb_x, thumb_y), 15, (255, 0, 0), cv2.FILLED)
-                cv2.circle(img, (index_x, index_y), 15, (255, 0, 0), cv2.FILLED)
-                cv2.line(img, (thumb_x, thumb_y), (index_x, index_y), (255, 0, 0), 3)
-                
-                # Calculate distance between fingers
-                length = math.hypot(index_x - thumb_x, index_y - thumb_y)
-                
-                # Hand range: 50 - 300
-                # Volume range: -65.25 - 0
-                vol = np.interp(length, [50, 300], [minVol, maxVol])
-                volBar = np.interp(length, [50, 300], [400, 150])
-                volPercentage = np.interp(length, [50, 300], [0, 100])
-                
-                # Reduce resolution to make it smoother
-                vol = round(vol, 2)
-                
-                # Set system volume
-                try:
-                    volume.SetMasterVolumeLevel(vol, None)
-                except Exception as e:
-                    st.error(f"Error setting volume: {e}")
-                
-                # Draw volume bar
-                cv2.rectangle(img, (50, 150), (85, 400), (0, 255, 0), 3)
-                cv2.rectangle(img, (50, int(volBar)), (85, 400), (0, 255, 0), cv2.FILLED)
-                cv2.putText(img, f'{int(volPercentage)}%', (40, 450),
-                            cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 3)
+    def calculate_fps(self):
+        """Calculate FPS"""
+        current_time = time.time()
+        fps = 1 / (current_time - self.start_time)
+        self.start_time = current_time
+        return fps
 
-            return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-    # WebRTC configuration
-    RTC_CONFIGURATION = RTCConfiguration(
-        {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-    )
-    
-    # Create WebRTC streamer
-    try:
-        webrtc_ctx = webrtc_streamer(
-            key="hand-gesture-volume",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIGURATION,
-            video_processor_factory=VideoProcessor,
-            media_stream_constraints={"video": True, "audio": False},
-            async_processing=True,
+    def process_frame(self, frame):
+        """Process a single frame for eye detection"""
+        if frame is None:
+            raise ValueError("Invalid frame: None")
+            
+        # Convert to grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Detect faces
+        faces = self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=5,
+            minSize=(30, 30)
         )
-    except Exception as e:
-        st.error(f"Error initializing webcam: {e}")
-        st.info("Please make sure you have granted camera permissions to the browser.")
+        
+        eyes_detected = False
+        
+        # Process each face
+        for (x, y, w, h) in faces:
+            # Draw rectangle around face
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            
+            # Region of interest for eyes
+            roi_gray = gray[y:y+h, x:x+w]
+            roi_color = frame[y:y+h, x:x+w]
+            
+            # Detect eyes
+            eyes = self.eye_cascade.detectMultiScale(
+                roi_gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(20, 20)
+            )
+            
+            # Draw rectangles around eyes and update detection flag
+            if len(eyes) >= 2:  # Both eyes detected
+                eyes_detected = True
+                for (ex, ey, ew, eh) in eyes:
+                    cv2.rectangle(roi_color, (ex, ey), (ex+ew, ey+eh), (0, 255, 0), 2)
+        
+        # Detect blink
+        blink_detected = self.detect_blink(self.last_eyes_detected, eyes_detected)
+        self.last_eyes_detected = eyes_detected
+        
+        # Calculate FPS
+        fps = self.calculate_fps()
+        
+        # Add text to frame
+        cv2.putText(frame, f'Blinks: {self.total_blinks}', (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(frame, f'FPS: {int(fps)}', (10, 60), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        
+        # Add eye state indicator
+        eye_state = "Eyes Open" if eyes_detected else "Eyes Closed"
+        cv2.putText(frame, eye_state, (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if eyes_detected else (0, 0, 255), 2)
+        
+        # Return the processed frame as a bytes stream
+        ret, buffer = cv2.imencode('.jpg', frame)
+        return buffer.tobytes()
 
-if __name__ == "__main__":
-    main()
+# Create the detector instance
+detector = EyeBlinkDetector()
+
+# Streamlit App
+st.title("Eye Blink Detection")
+
+# Live Video Feed
+context = st.context
+video_capture = cv2.VideoCapture(0)
+
+run_app = st.checkbox("Run App")
+while run_app:
+    ret, frame = video_capture.read()
+    if not ret:
+        break
+
+    # Process the frame
+    processed_frame_bytes = detector.process_frame(frame)
+
+    # Display the processed frame
+    st.image(processed_frame_bytes, width=640)
+
+    # Break loop on 'Stop' button press (simulated by unchecking the checkbox)
+
+    # Cleanup
+video_capture.release()
+cv2.destroyAllWindows()
+
