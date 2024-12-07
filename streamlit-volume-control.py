@@ -1,158 +1,78 @@
 import streamlit as st
-import cv2
+import pandas as pd
 import numpy as np
-import time
-import os
 
-# EyeBlinkDetector class
-class EyeBlinkDetector:
-    def __init__(self):
-        # Get the path to the haar cascade files
-        cascade_path = cv2.data.haarcascades
-        face_cascade_path = os.path.join(cascade_path, 'haarcascade_frontalface_default.xml')
-        eye_cascade_path = os.path.join(cascade_path, 'haarcascade_eye.xml')
-        
-        # Verify cascade files exist
-        if not os.path.exists(face_cascade_path):
-            raise FileNotFoundError(f"Face cascade file not found at: {face_cascade_path}")
-        if not os.path.exists(eye_cascade_path):
-            raise FileNotFoundError(f"Eye cascade file not found at: {eye_cascade_path}")
-            
-        # Load the pre-trained haar cascade classifiers
-        self.face_cascade = cv2.CascadeClassifier()
-        self.eye_cascade = cv2.CascadeClassifier()
-        
-        # Load the cascades and check if loaded successfully
-        if not self.face_cascade.load(face_cascade_path):
-            raise RuntimeError("Error loading face cascade classifier")
-        if not self.eye_cascade.load(eye_cascade_path):
-            raise RuntimeError("Error loading eye cascade classifier")
-        
-        print("Cascade classifiers loaded successfully")
-        
-        # Initialize parameters
-        self.blink_counter = 0
-        self.total_blinks = 0
-        self.frame_count = 0
-        self.last_eyes_detected = True
-        self.start_time = time.time()
-        
-        # Parameters for improved blink detection
-        self.no_eye_frames = 0
-        self.MIN_FRAMES_EYES_CLOSED = 2  # Minimum frames eyes must be closed to count as blink
-        self.MAX_FRAMES_EYES_CLOSED = 6  # Maximum frames eyes can be closed to count as blink
-        
-    def detect_blink(self, prev_eyes_detected, current_eyes_detected):
-        """
-        Improved blink detection with frame counting
-        Returns True if a blink is detected
-        """
-        if not current_eyes_detected:
-            self.no_eye_frames += 1
-        elif current_eyes_detected:
-            # If eyes were closed for an appropriate duration, count as blink
-            if self.MIN_FRAMES_EYES_CLOSED <= self.no_eye_frames <= self.MAX_FRAMES_EYES_CLOSED:
-                self.total_blinks += 1
-                self.no_eye_frames = 0
-                return True
-            self.no_eye_frames = 0
-        return False
-            
-    def calculate_fps(self):
-        """Calculate FPS"""
-        current_time = time.time()
-        fps = 1 / (current_time - self.start_time)
-        self.start_time = current_time
-        return fps
+# Set the title and description
+st.title("Fraud Detection System (Preview)")
+st.write("Please enter the transaction details below to see the predicted fraud status and explanation.")
 
-    def process_frame(self, frame):
-        """Process a single frame for eye detection"""
-        if frame is None:
-            raise ValueError("Invalid frame: None")
-            
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Detect faces
-        faces = self.face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
-        
-        eyes_detected = False
-        
-        # Process each face
-        for (x, y, w, h) in faces:
-            # Draw rectangle around face
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            
-            # Region of interest for eyes
-            roi_gray = gray[y:y+h, x:x+w]
-            roi_color = frame[y:y+h, x:x+w]
-            
-            # Detect eyes
-            eyes = self.eye_cascade.detectMultiScale(
-                roi_gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(20, 20)
-            )
-            
-            # Draw rectangles around eyes and update detection flag
-            if len(eyes) >= 2:  # Both eyes detected
-                eyes_detected = True
-                for (ex, ey, ew, eh) in eyes:
-                    cv2.rectangle(roi_color, (ex, ey), (ex+ew, ey+eh), (0, 255, 0), 2)
-        
-        # Detect blink
-        blink_detected = self.detect_blink(self.last_eyes_detected, eyes_detected)
-        self.last_eyes_detected = eyes_detected
-        
-        # Calculate FPS
-        fps = self.calculate_fps()
-        
-        # Add text to frame
-        cv2.putText(frame, f'Blinks: {self.total_blinks}', (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        cv2.putText(frame, f'FPS: {int(fps)}', (10, 60), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-        
-        # Add eye state indicator
-        eye_state = "Eyes Open" if eyes_detected else "Eyes Closed"
-        cv2.putText(frame, eye_state, (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if eyes_detected else (0, 0, 255), 2)
-        
-        # Return the processed frame as a bytes stream
-        ret, buffer = cv2.imencode('.jpg', frame)
-        return buffer.tobytes()
+# Step 1: Input Transaction Details (using relevant features)
+st.header("Enter Transaction Details")
+transaction_id = st.text_input("Transaction ID")
+account_number = st.text_input("Account Number")
+name_sender = st.text_input("Name (Sender)")
+date = st.date_input("Transaction Date")
+time = st.time_input("Transaction Time")
+transaction_type = st.selectbox("Transaction Type", ["Credit", "Debit"])
+amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01)
+before_balance = st.number_input("Before Balance (INR)", min_value=0.0, step=0.01)
+after_balance = st.number_input("After Balance (INR)", min_value=0.0, step=0.01)
+location = st.text_input("Transaction Location")
+merchant_category = st.selectbox("Merchant Category", ["Retail", "Food", "Entertainment", "Others"])
+recipient_name = st.text_input("Recipient Name")
+recipient_account_id = st.text_input("Recipient Account/ID")
+ip_address = st.text_input("IP Address")
+device_info = st.text_input("Device Info")
+payment_method = st.selectbox("Payment Method", ["Card", "UPI", "Net Banking", "Wallet"])
+card_number = st.text_input("Card Number (masked)", type="password")
+authentication_method = st.selectbox("Authentication Method", ["OTP", "Biometric", "PIN", "None"])
+payment_status = st.selectbox("Payment Status", ["Success", "Failure"])
+fraud_indicator = st.selectbox("Fraud Indicator (Simulated)", ["Yes", "No"])
 
-# Create the detector instance
-detector = EyeBlinkDetector()
+# Step 2: Simulate Fraud Detection Logic (Simple Rule-Based Approach)
+if st.button("Check Fraud Status"):
+    fraud_risk_score = 0
 
-# Streamlit App
-st.title("Eye Blink Detection")
+    # Example rule-based fraud detection logic (can be adjusted)
+    if amount > 50000:
+        fraud_risk_score += 1  # High amount
+    if location.lower() not in ['new york', 'los angeles', 'mumbai']:  # Unusual location
+        fraud_risk_score += 1
+    if payment_status == "Failure":
+        fraud_risk_score += 1  # Failed transactions might be fraud
+    if authentication_method == "None":
+        fraud_risk_score += 1  # Lack of authentication could signal fraud
+    if fraud_indicator == "Yes":
+        fraud_risk_score += 1  # Simulate fraud indicator being "Yes"
 
-# Live Video Feed
-context = st.context
-video_capture = cv2.VideoCapture(0)
+    # Predict based on fraud risk score
+    if fraud_risk_score >= 2:
+        st.write("### Fraud Prediction: **Fraudulent**")
+        st.write("The transaction is flagged as fraudulent due to suspicious patterns.")
+    else:
+        st.write("### Fraud Prediction: **Safe**")
+        st.write("The transaction appears to be legitimate based on the provided details.")
 
-run_app = st.checkbox("Run App")
-while run_app:
-    ret, frame = video_capture.read()
-    if not ret:
-        break
+# Step 3: Provide Model Explanation
+st.header("Fraud Detection Model Explanation")
+if fraud_risk_score >= 2:
+    explanation = """
+    - The transaction amount exceeds typical thresholds, signaling possible fraud.
+    - The transaction location is unusual for the user or merchant.
+    - The payment failed, suggesting a potential fraud attempt.
+    - Lack of authentication method (such as OTP or biometric) raises red flags.
+    - Fraud indicator is marked as "Yes" based on historical patterns.
+    """
+else:
+    explanation = """
+    - The transaction amount is within a typical range for this account.
+    - The location and payment method appear consistent with user behavior.
+    - Successful transaction with proper authentication and no fraud indicators.
+    """
 
-    # Process the frame
-    processed_frame_bytes = detector.process_frame(frame)
+st.write("### Explanation for Fraud Prediction:")
+st.write(explanation)
 
-    # Display the processed frame
-    st.image(processed_frame_bytes, width=640)
-
-    # Break loop on 'Stop' button press (simulated by unchecking the checkbox)
-
-    # Cleanup
-video_capture.release()
-cv2.destroyAllWindows()
-
+# Optional: Add flowchart to illustrate the process
+st.header("Fraud Detection Process Flow")
+st.image("path_to_your_flowchart_image.png", caption="Fraud Detection Process Flowchart")  # Replace with your actual flowchart image
