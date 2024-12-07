@@ -76,4 +76,4 @@ st.write(explanation)
 
 # Optional: Add flowchart to illustrate the process
 st.header("Fraud Detection Process Flow")
-st.image("path_to_your_flowchart_image.png", caption="Fraud Detection Process Flowchart")  # Replace with your actual flowchart image
+st.image("https://ibb.co/YjbQnjS", caption="Fraud Detection Process Flowchart")  # Replace with your actual flowchart image
