@@ -29,10 +29,11 @@ authentication_method = st.selectbox("Authentication Method", ["OTP", "Biometric
 payment_status = st.selectbox("Payment Status", ["Success", "Failure"])
 fraud_indicator = st.selectbox("Fraud Indicator (Simulated)", ["Yes", "No"])
 
+# Initialize fraud_risk_score outside the button's scope
+fraud_risk_score = 0
+
 # Step 2: Simulate Fraud Detection Logic (Simple Rule-Based Approach)
 if st.button("Check Fraud Status"):
-    fraud_risk_score = 0
-
     # Example rule-based fraud detection logic (can be adjusted)
     if amount > 50000:
         fraud_risk_score += 1  # High amount
