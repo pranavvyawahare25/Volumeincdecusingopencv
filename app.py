@@ -14,18 +14,47 @@ st.set_page_config(
 @st.cache_resource
 def load_models_and_data():
     try:
-        svd = joblib.load('svd_model.joblib')
-        scaler = joblib.load('scaler_model.joblib')
-        user_item_matrix = pd.read_pickle('user_item_matrix.pkl')
-        products = pd.read_pickle('products.pkl')
-        return svd, scaler, user_item_matrix, products
+        # Load the CSV files directly instead of pickled files
+        products = pd.read_csv('PRODUCT_NEW (1).csv')
+        ratings = pd.read_csv('PRODUCT_NEW_RATINGS (1).csv')
+        
+        # Create user-item matrix
+        user_item_matrix = pd.pivot_table(
+            ratings,
+            values='rating',
+            index='user-id',
+            columns='product-id',
+            fill_value=0
+        )
+        
+        # Train SVD model
+        scaler = StandardScaler()
+        scaled_data = scaler.fit_transform(user_item_matrix)
+        
+        svd = TruncatedSVD(n_components=50)
+        svd.fit(scaled_data)
+        
+        return svd, scaler, user_item_matrix, products, ratings
     except Exception as e:
-        st.error(f"Error loading models and data: {str(e)}")
-        return None, None, None, None
+        st.error(f"Error loading data: {str(e)}")
+        return None, None, None, None, None
 
-def get_recommendations(user_id, svd, scaler, user_item_matrix, products, n_recommendations=5):
+def get_product_details(product_id, products_df):
+    product = products_df[products_df['product-id'] == product_id]
+    if not product.empty:
+        return {
+            'Product Name': product.iloc[0]['product_name'],
+            'Category': product.iloc[0]['category'],
+            'Price': product.iloc[0]['price']
+        }
+    return None
+
+def get_recommendations(user_id, svd, scaler, user_item_matrix, products_df, n_recommendations=5):
     try:
         # Get user's row index
+        if user_id not in user_item_matrix.index:
+            return None
+            
         user_idx = user_item_matrix.index.get_loc(user_id)
         
         # Get user's scaled ratings
@@ -47,14 +76,13 @@ def get_recommendations(user_id, svd, scaler, user_item_matrix, products, n_reco
         # Get top N recommendations
         recommendations = []
         for product_id, pred_rating in sorted_predictions[:n_recommendations]:
-            product = products[products['product-id'] == product_id].iloc[0]
-            recommendations.append({
-                'Product ID': product_id,
-                'Product Name': product.get('product_name', 'N/A'),
-                'Category': product.get('category', 'N/A'),
-                'Price': product.get('price', 'N/A'),
-                'Predicted Rating': pred_rating
-            })
+            product_details = get_product_details(product_id, products_df)
+            if product_details:
+                recommendations.append({
+                    'Product ID': product_id,
+                    **product_details,
+                    'Predicted Rating': pred_rating
+                })
         
         return recommendations
     except Exception as e:
@@ -66,10 +94,10 @@ def main():
     st.write("Select a user to get personalized product recommendations!")
     
     # Load models and data
-    svd, scaler, user_item_matrix, products = load_models_and_data()
+    svd, scaler, user_item_matrix, products, ratings = load_models_and_data()
     
-    if svd is None or scaler is None or user_item_matrix is None or products is None:
-        st.error("Failed to load required models and data.")
+    if any(x is None for x in [svd, scaler, user_item_matrix, products, ratings]):
+        st.error("Failed to load required data.")
         return
     
     # Sidebar
@@ -86,7 +114,7 @@ def main():
     
     with col1:
         # User selection
-        user_ids = sorted(user_item_matrix.index.tolist())
+        user_ids = sorted(ratings['user-id'].unique())
         user_id = st.selectbox("Select User ID:", user_ids)
         
         if st.button("Get Recommendations", type="primary"):
