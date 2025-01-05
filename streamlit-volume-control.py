@@ -1,79 +1,59 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from tensorflow.keras.models import load_model
 
-# Set the title and description
-st.title("Fraud Detection System (Preview)")
-st.write("Please enter the transaction details below to see the predicted fraud status and explanation.")
+# Load the model
+model = load_model('product_recommendation_model.h5')
 
-# Step 1: Input Transaction Details (using relevant features)
-st.header("Enter Transaction Details")
-transaction_id = st.text_input("Transaction ID")
-account_number = st.text_input("Account Number")
-name_sender = st.text_input("Name (Sender)")
-date = st.date_input("Transaction Date")
-time = st.time_input("Transaction Time")
-transaction_type = st.selectbox("Transaction Type", ["Credit", "Debit"])
-amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01)
-before_balance = st.number_input("Before Balance (INR)", min_value=0.0, step=0.01)
-after_balance = st.number_input("After Balance (INR)", min_value=0.0, step=0.01)
-location = st.text_input("Transaction Location")
-merchant_category = st.selectbox("Merchant Category", ["Retail", "Food", "Entertainment", "Others"])
-recipient_name = st.text_input("Recipient Name")
-recipient_account_id = st.text_input("Recipient Account/ID")
-ip_address = st.text_input("IP Address")
-device_info = st.text_input("Device Info")
-payment_method = st.selectbox("Payment Method", ["Card", "UPI", "Net Banking", "Wallet"])
-card_number = st.text_input("Card Number (masked)", type="password")
-authentication_method = st.selectbox("Authentication Method", ["OTP", "Biometric", "PIN", "None"])
-payment_status = st.selectbox("Payment Status", ["Success", "Failure"])
-fraud_indicator = st.selectbox("Fraud Indicator (Simulated)", ["Yes", "No"])
+# Load datasets (replace with your actual file paths)
+products = pd.read_csv('/content/PRODUCT_NEW (1).csv')
+ratings = pd.read_csv('/content/PRODUCT_NEW_RATINGS (1).csv')
 
-# Initialize fraud_risk_score outside the button's scope
-fraud_risk_score = 0
+# Preprocess the data
+user_ids = ratings['user-id'].unique()
+product_ids = ratings['product-id'].unique()
 
-# Step 2: Simulate Fraud Detection Logic (Simple Rule-Based Approach)
-if st.button("Check Fraud Status"):
-    # Example rule-based fraud detection logic (can be adjusted)
-    if amount > 50000:
-        fraud_risk_score += 1  # High amount
-    if location.lower() not in ['new york', 'los angeles', 'mumbai']:  # Unusual location
-        fraud_risk_score += 1
-    if payment_status == "Failure":
-        fraud_risk_score += 1  # Failed transactions might be fraud
-    if authentication_method == "None":
-        fraud_risk_score += 1  # Lack of authentication could signal fraud
-    if fraud_indicator == "Yes":
-        fraud_risk_score += 1  # Simulate fraud indicator being "Yes"
+user_to_index = {user_id: idx for idx, user_id in enumerate(user_ids)}
+index_to_user = {idx: user_id for user_id, idx in user_to_index.items()}
+product_to_index = {product_id: idx for idx, product_id in enumerate(product_ids)}
+index_to_product = {idx: product_id for product_id, idx in product_to_index.items()}
 
-    # Predict based on fraud risk score
-    if fraud_risk_score >= 2:
-        st.write("### Fraud Prediction: **Fraudulent**")
-        st.write("The transaction is flagged as fraudulent due to suspicious patterns.")
+# Define a function to recommend products
+def recommend_products(user_id, num_recommendations=5):
+    if user_id not in user_to_index:
+        return f"User ID {user_id} not found!"
+    
+    user_idx = user_to_index[user_id]
+    product_indices = np.array(list(product_to_index.values()))
+    
+    # Predict ratings for all products for the given user
+    user_indices = np.full_like(product_indices, user_idx)
+    predictions = model.predict([user_indices, product_indices])
+    
+    # Get top N recommendations
+    top_indices = predictions.flatten().argsort()[-num_recommendations:][::-1]
+    recommended_products = [
+        {
+            "Product ID": index_to_product[idx],
+            "Predicted Rating": predictions[idx][0]
+        }
+        for idx in top_indices
+    ]
+    return recommended_products
+
+# Streamlit UI
+st.title("Product Recommendation System")
+st.write("This app demonstrates a simple recommendation system using a trained model.")
+
+# User input for selecting a User ID
+user_id = st.selectbox("Select a User ID:", user_ids)
+
+# Button to get recommendations
+if st.button("Get Recommendations"):
+    recommendations = recommend_products(user_id)
+    if isinstance(recommendations, str):
+        st.error(recommendations)
     else:
-        st.write("### Fraud Prediction: **Safe**")
-        st.write("The transaction appears to be legitimate based on the provided details.")
-
-# Step 3: Provide Model Explanation
-st.header("Fraud Detection Model Explanation")
-if fraud_risk_score >= 2:
-    explanation = """
-    - The transaction amount exceeds typical thresholds, signaling possible fraud.
-    - The transaction location is unusual for the user or merchant.
-    - The payment failed, suggesting a potential fraud attempt.
-    - Lack of authentication method (such as OTP or biometric) raises red flags.
-    - Fraud indicator is marked as "Yes" based on historical patterns.
-    """
-else:
-    explanation = """
-    - The transaction amount is within a typical range for this account.
-    - The location and payment method appear consistent with user behavior.
-    - Successful transaction with proper authentication and no fraud indicators.
-    """
-
-st.write("### Explanation for Fraud Prediction:")
-st.write(explanation)
-
-# Optional: Add flowchart to illustrate the process
-st.header("Fraud Detection Process Flow")
-st.image("https://www.imghippo.com/i/yIv7902h.png", caption="Fraud Detection Process Flowchart")  # Replace with your actual flowchart image
+        st.write("Top Recommendations:")
+        st.table(pd.DataFrame(recommendations))
